@@ -167,7 +167,7 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
     $currency = $this->currency;
     $tstamp = round(microtime(true) * 1000);
     $mcode = $this->merchantCode;
-    $header_signature = hash('sha256', $mcode . $tstamp . $this->apiKey);
+    $header_signature = hash_hmac('sha256', $mcode . $tstamp , $this->apiKey);
     $current_user = $order->get_billing_first_name() . " " . $order->get_billing_last_name();
 
     $item_details = [];
@@ -375,7 +375,7 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
 
     $url = $endpoint_url . '/api/merchant/transactionStatus';
     $this->log("url validate transaction " . $url);
-    $signature = md5($this->merchantCode . $this->prefix . $order_id . $this->apiKey);
+    $signature = hash_hmac('sha256', $this->merchantCode . $this->prefix . $order_id , $this->apiKey);
     $params = array(
       'merchantCode' => $this->merchantCode, // API Key Merchant /
       'merchantOrderId' => $this->prefix . $order_id,
@@ -446,7 +446,7 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
     $amount = intval($order->order_total);
 
     //signature validation
-	$signature = md5($this->merchantCode . $amount . $this->prefix . $order_id . $this->apiKey);
+	$signature =hash_hmac('sha256', $this->merchantCode . $amount . $this->prefix . $order_id , $this->apiKey);
 
     // Log raw signature
 	if($reqSignature == $signature){
