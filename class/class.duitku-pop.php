@@ -266,7 +266,6 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
       'additionalParam' => '',
       'email' => $order->get_billing_email(),
       'phoneNumber' => $order->get_billing_phone(),
-      // WooCommerce order-received (thank-you) page; its URL carries the order key, which WooCommerce verifies
       'returnUrl' => $order->get_checkout_order_received_url(),
       'callbackUrl' => esc_url_raw($this->redirect_url),
       'customerDetail' => $customer_details,
@@ -424,41 +423,43 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
     }
 
     $params = [];
-    $params['resultCode'] = isset($_POST['resultCode']) ? sanitize_text_field($_POST['resultCode']) : null;
+    $params['merchantCode']    = isset($_POST['merchantCode']) ? sanitize_text_field($_POST['merchantCode']) : null;
+    $params['amount']          = isset($_POST['amount']) ? sanitize_text_field($_POST['amount']) : null;
     $params['merchantOrderId'] = isset($_POST['merchantOrderId']) ? sanitize_text_field($_POST['merchantOrderId']) : null;
-    $params['reference'] = isset($_POST['reference']) ? sanitize_text_field($_POST['reference']) : null;
+    $params['resultCode']      = isset($_POST['resultCode']) ? sanitize_text_field($_POST['resultCode']) : null;
+    $params['reference']       = isset($_POST['reference']) ? sanitize_text_field($_POST['reference']) : null;
+    $params['signature']       = isset($_POST['signature']) ? sanitize_text_field($_POST['signature']) : null;
 
-    $params['merchantOrderId'] = str_replace($this->prefix,'',$params['merchantOrderId']);
-
-    if (empty($params['resultCode']) || empty($params['merchantOrderId']) || empty($params['reference'])) {
+    if (empty($params['merchantCode']) || $params['amount'] === null || $params['amount'] === ''
+        || empty($params['merchantOrderId']) || empty($params['resultCode'])
+        || empty($params['reference']) || empty($params['signature'])) {
       status_header(400);
-      exit('wrong query string please contact admin.');
+      exit('Bad Request: missing callback parameter.');
     }
 
-    $order_id = wc_clean(stripslashes($params['merchantOrderId']));
+    if (!ctype_digit((string) $params['amount'])) {
+      status_header(400);
+      exit('Bad Request: invalid amount.');
+    }
+
+    $reqSignature = $params['signature'];
+    $signature = hash_hmac('sha256', $params['merchantCode'] . $params['amount'] . $params['merchantOrderId'], $this->apiKey);
+    if (!hash_equals($signature, $reqSignature)) {
+      $this->log("Invalid signature!");
+      status_header(400);
+      exit('Bad Request: invalid signature.');
+    }
+    $this->log("Signature valid");
+    
+    $order_id = wc_clean(stripslashes(str_replace($this->prefix, '', $params['merchantOrderId'])));
     $result_Code = wc_clean(stripslashes($params['resultCode']));
     $reference = wc_clean(stripslashes($params['reference']));
-
-    $params['signature']= isset($_POST['signature'])? sanitize_text_field($_POST['signature']): null;
-    $reqSignature = wc_clean(stripslashes($params['signature']));
 
     $order = wc_get_order( $order_id );
     if (!$order) {
       $this->log("Callback for unknown order ID " . $order_id);
       status_header(404);
       exit('order not found.');
-    }
-    $amount = intval($order->order_total);
-
-    //signature validation
-    $signature = hash_hmac('sha256', $this->merchantCode . $amount . $this->prefix . $order_id , $this->apiKey);
-
-    // Log raw signature
-    if(hash_equals($signature, (string) $reqSignature)){
-      $this->log("Signature valid");
-    }else{
-      $this->log("Invalid signature!");
-      exit;
     }
     $respon = json_decode($this->validate_transaction($order_id));
     $order->update_meta_data('_duitku_result_code', $respon->statusCode);
