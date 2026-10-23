@@ -414,12 +414,16 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
   }
 
   function check_duitku_response(){
-
-    // Duitku sends the payment callback as a signed server-to-server POST; reject anything else.
     if (strtoupper(isset($_SERVER['REQUEST_METHOD']) ? $_SERVER['REQUEST_METHOD'] : '') !== 'POST') {
       status_header(405);
       header('Allow: POST');
       exit('Method Not Allowed');
+    }
+
+    $ctype = isset($_SERVER['CONTENT_TYPE']) ? strtolower($_SERVER['CONTENT_TYPE']) : '';
+    if (strpos($ctype, 'application/x-www-form-urlencoded') === false) {
+      status_header(400);
+      exit('Bad Request: unsupported content type.');
     }
 
     $params = [];
