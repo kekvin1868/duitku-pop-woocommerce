@@ -93,6 +93,8 @@ Integrating online payments with Duitku is very easy, web integration using our 
 = 1.0.5 =
 
 Security Upgrade signature hashing algorithm from SHA256/MD5 to HMAC-SHA256
+Security: verify order key on the payment return path and compare signatures with hash_equals (CVE-2026-32468)
+Security: remove customer data from debug logs
 
 = 1.0.4 =
 

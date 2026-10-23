@@ -266,8 +266,9 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
       'additionalParam' => '',
       'email' => $order->get_billing_email(),
       'phoneNumber' => $order->get_billing_phone(),
-      'returnUrl' => esc_url_raw($this->redirect_url) . '?status=notify',
-	  'callbackUrl' => esc_url_raw($this->redirect_url),
+      // order key lets notify_response() verify the shopper owns this order
+      'returnUrl' => esc_url_raw(add_query_arg(array('status' => 'notify', 'key' => $order->get_order_key()), $this->redirect_url)),
+      'callbackUrl' => esc_url_raw($this->redirect_url),
       'customerDetail' => $customer_details,
       'itemDetails' => $item_details
     );
@@ -281,7 +282,7 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
     }
 
     $this->log("Create a request for inquiry");
-    $this->log(json_encode($params, true));
+    $this->log('merchantOrderId ' . $params['merchantOrderId'] . ' paymentAmount ' . $params['paymentAmount']);
     
     $headers = array(
       'Content-Type' => 'application/json',
@@ -301,8 +302,8 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
     // Receive server response ...
     $response = wp_remote_post($url, $args);
 
-    $this->log('raw response: ' . json_encode($response));
     $httpcode = wp_remote_retrieve_response_code($response);//curl_getinfo($ch, CURLINFO_HTTP_CODE);
+    $this->log('response HTTP code: ' . $httpcode);
     $server_output = wp_remote_retrieve_body($response);//curl_exec($ch);
 
     $successResponse = array(
@@ -420,6 +421,7 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
     $params['status'] = isset($_REQUEST['status']) ? sanitize_text_field($_REQUEST['status']) : null;
     $params['merchantOrderId'] = isset($_REQUEST['merchantOrderId']) ? sanitize_text_field($_REQUEST['merchantOrderId']) : null;
     $params['reference'] = isset($_REQUEST['reference']) ? sanitize_text_field($_REQUEST['reference']) : null;
+    $params['key'] = isset($_REQUEST['key']) ? sanitize_text_field($_REQUEST['key']) : null;
 
     $params['merchantOrderId'] = str_replace($this->prefix,'',$params['merchantOrderId']);
 
@@ -440,21 +442,21 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
     $reference = wc_clean(stripslashes($params['reference']));
 
     $params['signature']= isset($_REQUEST['signature'])? sanitize_text_field($_REQUEST['signature']): null;
-	$reqSignature = wc_clean(stripslashes($params['signature']));
+    $reqSignature = wc_clean(stripslashes($params['signature']));
 
     $order = wc_get_order( $order_id ); 
     $amount = intval($order->order_total);
 
     //signature validation
-	$signature =hash_hmac('sha256', $this->merchantCode . $amount . $this->prefix . $order_id , $this->apiKey);
+    $signature = hash_hmac('sha256', $this->merchantCode . $amount . $this->prefix . $order_id , $this->apiKey);
 
     // Log raw signature
-	if($reqSignature == $signature){
-		$this->log("Signature valid");
-	}else{
-		$this->log("Invalid signature!");
-		exit;
-	}
+    if(hash_equals($signature, (string) $reqSignature)){
+      $this->log("Signature valid");
+    }else{
+      $this->log("Invalid signature!");
+      exit;
+    }
     $respon = json_decode($this->validate_transaction($order_id));
     $order->update_meta_data('_duitku_result_code', $respon->statusCode);
     $order->update_meta_data('_duitku_reference_number', $reference);
@@ -501,16 +503,19 @@ class WC_Gateway_Duitku_Pop extends WC_Payment_Gateway
   }
 
   function notify_response($params){
-      $this->log(var_export($params, true));
-
       if (empty($params['resultCode']) || empty($params['merchantOrderId'])) {
 		throw new Exception(__('wrong query string please contact admin.', 'duitku'));
 			return false;
-	  }	
+      }
 
       $order_id = wc_clean(stripslashes($params['merchantOrderId']));
       $order_id = str_replace($this->prefix,'',$order_id);
       $order = wc_get_order($order_id);
+
+      if (!$order || empty($params['key']) || !hash_equals($order->get_order_key(), $params['key'])) {
+            $this->log('Notify Response. Unverified return for order ID ' . $order_id);
+            return wp_safe_redirect(home_url('/my-account/orders/'));
+      }
 
       $order->update_meta_data('_duitku_result_code', $params['resultCode']);
       $order->update_meta_data('_duitku_reference_number', $params['reference']);
